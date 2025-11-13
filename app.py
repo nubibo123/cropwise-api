@@ -27,7 +27,8 @@ print(f"🔧 Đang sử dụng thiết bị: {device}")
 # Load model ResNet18
 model = models.resnet18(pretrained=False)
 num_ftrs = model.fc.in_features
-model.fc = nn.Linear(num_ftrs, 4)  # 4 lớp bệnh
+# The model was trained with 8 classes; update final layer to match saved weights
+model.fc = nn.Linear(num_ftrs, 8)  # 8 lớp bệnh (updated)
 
 # Load trọng số đã train
 model.load_state_dict(torch.load("model.pth", map_location=device))
@@ -36,23 +37,31 @@ model.eval()
 
 print("✅ Đã load model thành công!")
 
-# Định nghĩa labels (giống trong notebook)
+# Định nghĩa labels (the model uses 8 classes; mapping index -> english label)
 labels = {
     0: 'Blight',
-    1: 'Common_Rust', 
-    2: 'Gray_Leaf_Spot',
-    3: 'Healthy'
+    1: 'Common_Rust',
+    2: 'Downy_Mildew',
+    3: 'Gray_Leaf_Spot',
+    4: 'Healthy',
+    5: 'MLN_Lethal_Necrosis',
+    6: 'MSV_Streak_Virus',
+    7: 'Not_Maize_Leaf'
 }
 
-# Định nghĩa labels tiếng Việt
+# Định nghĩa labels tiếng Việt (index -> vietnamese label)
 labels_vi = {
     0: 'Bệnh Khô Lá',
     1: 'Bệnh Gỉ Sắt',
-    2: 'Bệnh Đốm Lá Xám',
-    3: 'Khỏe Mạnh'
+    2: 'Bệnh Sương Mai',
+    3: 'Bệnh Đốm Lá Xám',
+    4: 'Khỏe Mạnh',
+    5: 'MLN - Hoại tử (MLN)',
+    6: 'MSV - Virus vằn',
+    7: 'Không phải lá ngô'
 }
 
-# Mô tả bệnh
+# Mô tả bệnh (sơ lược). Bổ sung/hiệu chỉnh nội dung theo dữ liệu cụ thể nếu cần.
 disease_info = {
     0: {
         'name': 'Bệnh Khô Lá (Blight)',
@@ -61,18 +70,38 @@ disease_info = {
     },
     1: {
         'name': 'Bệnh Gỉ Sắt (Common Rust)',
-        'description': 'Bệnh nấm gây ra các đốm màu vàng cam trên lá.',
-        'treatment': 'Phun thuốc diệt nấm chứa mancozeb hoặc chlorothalonil.'
+        'description': 'Xuất hiện các đốm màu vàng-cam trên lá, do nấm gây ra.',
+        'treatment': 'Phun thuốc diệt nấm phù hợp và quản lý đồng ruộng.'
     },
     2: {
-        'name': 'Bệnh Đốm Lá Xám (Gray Leaf Spot)',
-        'description': 'Bệnh nấm gây ra các vết đốm xám trên lá ngô.',
-        'treatment': 'Luân canh cây trồng, sử dụng giống kháng bệnh, phun thuốc diệt nấm.'
+        'name': 'Bệnh Sương Mai (Downy Mildew)',
+        'description': 'Bệnh do nấm mốc gây ra, lá có lớp bột trắng ở mặt dưới.',
+        'treatment': 'Cải thiện thông gió, tránh ẩm ướt, sử dụng giống kháng và hóa chất khi cần.'
     },
     3: {
+        'name': 'Bệnh Đốm Lá Xám (Gray Leaf Spot)',
+        'description': 'Vết đốm xám trên lá, làm giảm diện tích quang hợp.',
+        'treatment': 'Luân canh cây trồng, sử dụng giống kháng bệnh, phun thuốc khi cần.'
+    },
+    4: {
         'name': 'Khỏe Mạnh (Healthy)',
-        'description': 'Cây ngô hoàn toàn khỏe mạnh, không có dấu hiệu bệnh tật.',
+        'description': 'Cây ngô hoàn toàn khỏe mạnh, không có dấu hiệu bệnh.',
         'treatment': 'Tiếp tục chăm sóc và theo dõi định kỳ.'
+    },
+    5: {
+        'name': 'MLN - Hoại tử (MLN Lethal Necrosis)',
+        'description': 'Hội chứng nghiêm trọng do kết hợp virus, gây hoại tử và chết cây.',
+        'treatment': 'Sử dụng giống kháng, quản lý vector (côn trùng), và biện pháp quản lý dịch hại tích hợp.'
+    },
+    6: {
+        'name': 'MSV - Virus vằn (MSV Streak Virus)',
+        'description': 'Virus gây sọc vằn trên lá, làm giảm năng suất.',
+        'treatment': 'Quản lý côn trùng truyền bệnh, loại bỏ cây bệnh, sử dụng giống kháng.'
+    },
+    7: {
+        'name': 'Không phải lá ngô (Not Maize Leaf)',
+        'description': 'Ảnh input không phải là lá ngô (hoặc không nhận diện được).',
+        'treatment': 'Kiểm tra lại ảnh đầu vào; đảm bảo ảnh đúng loại và chụp rõ.'
     }
 }
 
@@ -110,12 +139,13 @@ async def predict(file: UploadFile = File(...)):
             pred_class = torch.argmax(probs, dim=1).item()
             confidence = probs[0][pred_class].item()
         
-        # Tạo kết quả chi tiết
+        # Tạo kết quả chi tiết cho tất cả 8 lớp
         all_predictions = {}
-        for i in range(4):
-            all_predictions[labels_vi[i]] = {
+        num_classes = output.shape[1]
+        for i in range(num_classes):
+            all_predictions[labels_vi.get(i, str(i))] = {
                 "probability": float(probs[0][i] * 100),
-                "label_en": labels[i]
+                "label_en": labels.get(i, str(i))
             }
         
         # Trả về kết quả
