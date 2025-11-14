@@ -25,10 +25,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"🔧 Đang sử dụng thiết bị: {device}")
 
 
-# Load model DenseNet121
+# Load model DenseNet121 for 7 classes
 model = models.densenet121(pretrained=False)
 num_ftrs = model.classifier.in_features
-# The model was trained with 7 classes; update final layer to match saved weights
 model.classifier = nn.Linear(num_ftrs, 7)  # 7 lớp bệnh
 
 # Load trọng số đã train (robust loading)
@@ -46,6 +45,7 @@ try:
     for k, v in state_dict.items():
         new_key = k.replace('module.', '') if k.startswith('module.') else k
         new_state_dict[new_key] = v
+
 
     try:
         model.load_state_dict(new_state_dict)
@@ -83,8 +83,7 @@ labels_vi = {
     6: 'MSV - Virus vằn'
 }
 
-
-# Mô tả bệnh (7 class)
+# Mô tả bệnh (sơ lược) cho 7 lớp
 disease_info = {
     0: {
         'name': 'Bệnh Khô Lá (Blight)',
@@ -136,7 +135,7 @@ async def root():
     return {
         "message": "CropWise - Corn Disease Detection API",
         "status": "running",
-        "model": "ResNet18",
+        "model": "DenseNet121",
         "classes": labels_vi
     }
 
