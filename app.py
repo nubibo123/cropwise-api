@@ -24,20 +24,44 @@ app.add_middleware(
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"🔧 Đang sử dụng thiết bị: {device}")
 
-# Load model ResNet18
-model = models.resnet18(pretrained=False)
-num_ftrs = model.fc.in_features
-# The model was trained with 8 classes; update final layer to match saved weights
-model.fc = nn.Linear(num_ftrs, 8)  # 8 lớp bệnh (updated)
 
-# Load trọng số đã train
-model.load_state_dict(torch.load("model.pth", map_location=device))
-model = model.to(device)
-model.eval()
+# Load model DenseNet121
+model = models.densenet121(pretrained=False)
+num_ftrs = model.classifier.in_features
+# The model was trained with 7 classes; update final layer to match saved weights
+model.classifier = nn.Linear(num_ftrs, 7)  # 7 lớp bệnh
 
-print("✅ Đã load model thành công!")
+# Load trọng số đã train (robust loading)
+from collections import OrderedDict
+try:
+    checkpoint = torch.load("model.pth", map_location=device)
+    # If checkpoint is a dict with 'state_dict' key (training checkpoint), extract it
+    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        state_dict = checkpoint['state_dict']
+    else:
+        state_dict = checkpoint
 
-# Định nghĩa labels (the model uses 8 classes; mapping index -> english label)
+    # Remove module. prefix if the model was saved from DataParallel
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        new_key = k.replace('module.', '') if k.startswith('module.') else k
+        new_state_dict[new_key] = v
+
+    try:
+        model.load_state_dict(new_state_dict)
+    except RuntimeError:
+        # Last resort: try non-strict loading to allow partial matches
+        model.load_state_dict(new_state_dict, strict=False)
+
+    model = model.to(device)
+    model.eval()
+    print("✅ Đã load model thành công!")
+except Exception as e:
+    print(f"❌ Không thể load model.pth: {e}")
+    raise
+
+
+# Định nghĩa labels (the model uses 7 classes; mapping index -> english label)
 labels = {
     0: 'Blight',
     1: 'Common_Rust',
@@ -45,8 +69,7 @@ labels = {
     3: 'Gray_Leaf_Spot',
     4: 'Healthy',
     5: 'MLN_Lethal_Necrosis',
-    6: 'MSV_Streak_Virus',
-    7: 'Not_Maize_Leaf'
+    6: 'MSV_Streak_Virus'
 }
 
 # Định nghĩa labels tiếng Việt (index -> vietnamese label)
@@ -57,11 +80,11 @@ labels_vi = {
     3: 'Bệnh Đốm Lá Xám',
     4: 'Khỏe Mạnh',
     5: 'MLN - Hoại tử (MLN)',
-    6: 'MSV - Virus vằn',
-    7: 'Không phải lá ngô'
+    6: 'MSV - Virus vằn'
 }
 
-# Mô tả bệnh (sơ lược). Bổ sung/hiệu chỉnh nội dung theo dữ liệu cụ thể nếu cần.
+
+# Mô tả bệnh (7 class)
 disease_info = {
     0: {
         'name': 'Bệnh Khô Lá (Blight)',
@@ -97,11 +120,6 @@ disease_info = {
         'name': 'MSV - Virus vằn (MSV Streak Virus)',
         'description': 'Virus gây sọc vằn trên lá, làm giảm năng suất.',
         'treatment': 'Quản lý côn trùng truyền bệnh, loại bỏ cây bệnh, sử dụng giống kháng.'
-    },
-    7: {
-        'name': 'Không phải lá ngô (Not Maize Leaf)',
-        'description': 'Ảnh input không phải là lá ngô (hoặc không nhận diện được).',
-        'treatment': 'Kiểm tra lại ảnh đầu vào; đảm bảo ảnh đúng loại và chụp rõ.'
     }
 }
 
@@ -139,7 +157,7 @@ async def predict(file: UploadFile = File(...)):
             pred_class = torch.argmax(probs, dim=1).item()
             confidence = probs[0][pred_class].item()
         
-        # Tạo kết quả chi tiết cho tất cả 8 lớp
+        # Tạo kết quả chi tiết cho tất cả 7 lớp
         all_predictions = {}
         num_classes = output.shape[1]
         for i in range(num_classes):
