@@ -8,6 +8,7 @@ from torchvision import transforms
 import torch.nn.functional as F
 import io
 import uvicorn
+from typing import List
 
 app = FastAPI()
 
@@ -181,6 +182,70 @@ async def predict(file: UploadFile = File(...)):
         
     except Exception as e:
         print(f"❌ Lỗi: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+# Batch prediction endpoint
+@app.post("/predict-batch")
+async def predict_batch(files: List[UploadFile] = File(...)):
+    try:
+        tensors = []
+        filenames = []
+        results: list = []
+
+        # Preprocess each image; keep errors per-file without failing whole batch
+        for f in files:
+            try:
+                contents = await f.read()
+                image = Image.open(io.BytesIO(contents)).convert("RGB")
+                tensors.append(transform(image))
+                filenames.append(f.filename or "unknown")
+            except Exception as fe:
+                results.append({
+                    "filename": f.filename or "unknown",
+                    "success": False,
+                    "error": str(fe)
+                })
+
+        processed = 0
+        if len(tensors) > 0:
+            batch = torch.stack(tensors).to(device)
+            with torch.no_grad():
+                output = model(batch)
+                probs = F.softmax(output, dim=1)
+                preds = torch.argmax(probs, dim=1).tolist()
+
+            num_classes = output.shape[1]
+            for idx, fname in enumerate(filenames):
+                pred_class = preds[idx]
+                confidence = probs[idx][pred_class].item()
+                all_predictions = {}
+                for i in range(num_classes):
+                    all_predictions[labels_vi.get(i, str(i))] = {
+                        "probability": float(probs[idx][i] * 100),
+                        "label_en": labels.get(i, str(i))
+                    }
+
+                results.append({
+                    "filename": fname,
+                    "success": True,
+                    "predicted_class": labels[pred_class],
+                    "predicted_class_vi": labels_vi[pred_class],
+                    "confidence": float(confidence * 100),
+                    "disease_info": disease_info[pred_class],
+                    "all_predictions": all_predictions
+                })
+                processed += 1
+
+        return {
+            "success": True,
+            "processed": processed,
+            "failed": len([r for r in results if not r.get("success")]),
+            "results": results
+        }
+    except Exception as e:
         return {
             "success": False,
             "error": str(e)
