@@ -26,5 +26,5 @@ COPY yolo_leaf_model.pt .
 # Expose port
 EXPOSE 8001
 
-# Run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+# Run the application with increased timeout
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001", "--timeout-keep-alive", "300"]
